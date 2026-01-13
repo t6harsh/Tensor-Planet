@@ -1,0 +1,10 @@
+artifact_location: file:///Users/harsh/Documents/Extra/Tensor-Planet-intern/mlruns/530097796989287109/models/m-4ee6d57d2329477884f11e1367620d4d/artifacts
+creation_timestamp: 1768298288952
+experiment_id: '530097796989287109'
+last_updated_timestamp: 1768298292152
+model_id: m-4ee6d57d2329477884f11e1367620d4d
+model_type: null
+name: model
+source_run_id: 2c179cd40aa7422cb29bebc84f7a102a
+status: 2
+status_message: null

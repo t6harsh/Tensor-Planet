@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/harsh/Documents/Extra/Tensor-Planet-intern/mlruns/530097796989287109/3cec5dcc6ea24a7488d70809db4134cc/artifacts
+end_time: 1768298271423
+entry_point_name: ''
+experiment_id: '530097796989287109'
+lifecycle_stage: active
+run_id: 3cec5dcc6ea24a7488d70809db4134cc
+run_name: rare-toad-322
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1768298271163
+status: 4
+tags: []
+user_id: harsh

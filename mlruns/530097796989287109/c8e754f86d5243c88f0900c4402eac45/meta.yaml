@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/harsh/Documents/Extra/Tensor-Planet-intern/mlruns/530097796989287109/c8e754f86d5243c88f0900c4402eac45/artifacts
+end_time: 1768298254917
+entry_point_name: ''
+experiment_id: '530097796989287109'
+lifecycle_stage: active
+run_id: c8e754f86d5243c88f0900c4402eac45
+run_name: sedate-croc-345
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1768298254902
+status: 4
+tags: []
+user_id: harsh
