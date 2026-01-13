@@ -33,11 +33,13 @@ class FeaturePipeline:
         # 5 min = 1 step, 15 min = 3 steps, 60 min = 12 steps
         windows = [3, 12] 
         for w in windows:
+            # ffill() ensures we use the last valid reading if current is missing, 
+            # simulating a "hold" or simply handling gaps before rolling
             df[f'exhaust_temp_pre_mean_{w*5}m'] = vehicle_group['exhaust_temp_pre'].transform(
-                lambda x: x.rolling(window=w, min_periods=1).mean()
+                lambda x: x.ffill().rolling(window=w, min_periods=1).mean()
             )
             df[f'diff_pressure_mean_{w*5}m'] = vehicle_group['diff_pressure'].transform(
-                lambda x: x.rolling(window=w, min_periods=1).mean()
+                lambda x: x.ffill().rolling(window=w, min_periods=1).mean()
             )
             
         # 2. Cumulative Features (Since last Regen)

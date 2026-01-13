@@ -57,7 +57,7 @@ Files saved to data/
 **Data Quality Verification**:
 - ✅ Realistic correlations (higher load → higher soot accumulation)
 - ✅ Regeneration events properly reduce soot load
-- ✅ Sensor noise and missing values included (~5% missing rate)
+- ✅ Sensor noise and missing values included (~1% random failure rate)
 - ✅ Temporal consistency maintained across all datasets
 
 ### 2.2 Feature Engineering ✅
@@ -137,9 +137,9 @@ tests/test_pipeline.py::test_feature_generation PASSED
 tests/test_pipeline.py::test_rolling_windows PASSED
 tests/test_pipeline.py::test_missing_values PASSED
 tests/test_pipeline.py::test_cold_start_dpf PASSED
-tests/test_api.py::test_predict_endpoint PASSED
-tests/test_api.py::test_batch_endpoint PASSED
+tests/test_api.py::test_health PASSED
 tests/test_api.py::test_model_info PASSED
+tests/test_api.py::test_predict_soot_load_logic PASSED
 
 ======================== 7 passed in 3.42s ========================
 ```
@@ -165,17 +165,21 @@ INFO:     Application startup complete
 **Endpoints Implemented**:
 
 1. **POST /predict/soot-load**
-   - Input: Recent sensor readings (last N minutes)
+   - Input: Window of recent sensor readings (e.g. last 60 mins) + Vehicle State
    - Output: Soot load %, confidence interval, regeneration recommendation
    
    Example request:
    ```json
    {
      "vehicle_id": "VEH001",
-     "engine_load": 65.5,
-     "exhaust_temp": 420,
-     "differential_pressure": 2.8,
-     "rpm": 1800
+     "current_state": {
+        "time_since_last_regen_hours": 12.5,
+        "dist_since_last_regen_km": 600.0
+     },
+     "history_window": [
+        {"timestamp": "2026-01-01T10:00:00", "exhaust_temp_pre": 420, "diff_pressure": 2.8, "rpm": 1800, "engine_load": 65, "speed": 60},
+        ... (list of telemetry readings) ...
+     ]
    }
    ```
    
@@ -190,9 +194,7 @@ INFO:     Application startup complete
    }
    ```
 
-2. **POST /predict/batch**
-   - Input: Multiple vehicle readings
-   - Output: Fleet-wide predictions
+   *(Batch endpoint removed in v2.0 in favor of client-side batching for raw telemetry)*
    
 3. **GET /model/info**
    - Returns: Model version, training date, performance metrics

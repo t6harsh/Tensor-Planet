@@ -1,12 +1,13 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import xgboost as xgb
 import pandas as pd
+import numpy as np
 import json
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-app = FastAPI(title="DPF Soot Load Prediction API", version="1.0")
+app = FastAPI(title="DPF Soot Load Prediction API", version="2.0")
 
 # Global model artifacts
 model = None
@@ -35,40 +36,44 @@ def load_artifacts():
 # Load on startup
 load_artifacts()
 
-class TelemetryInput(BaseModel):
-    # Dynamic fields corresponding to features
-    # But to be safe, we accept a dictionary of features
-    # Or strict schema if we know features.
-    # Given features act as input, we expect clients to provide pre-calculated features 
-    # OR we provide raw telemetry and pipe it through feature engine.
-    # For this assignment, assuming "Input: Recent sensor readings (last N minutes)" 
-    # implies on-the-fly feature engineering.
-    # However, to keep it simple and robust:
-    # We will accept the *features* expected by the model.
-    # Implementing full feature pipeline in API is complex (stateful).
-    # Let's assume the input is the feature vector for simplicity, 
-    # OR simpler: pass the feature dictionary.
-    features: Dict[str, float]
+class TelemetryReading(BaseModel):
+    timestamp: str # ISO format
+    exhaust_temp_pre: float
+    diff_pressure: float
+    rpm: float
+    engine_load: float
+    speed: float
 
-class BatchInput(BaseModel):
-    instances: List[TelemetryInput]
+class VehicleState(BaseModel):
+    # Cumulative metrics tracked by the vehicle ECU or fleet system
+    time_since_last_regen_hours: float
+    dist_since_last_regen_km: float
+
+class PredictionRequest(BaseModel):
+    vehicle_id: str
+    # Window of recent data (e.g. last 60 mins), ordered by time
+    history_window: List[TelemetryReading]
+    current_state: VehicleState
 
 class PredictionOutput(BaseModel):
+    vehicle_id: str
     soot_load_predicted: float
     regeneration_needed: bool
-    confidence_interval: List[float] # simplified
+    confidence_interval: List[float]
+    warnings: List[str] = []
 
 @app.get("/health")
 def health_check():
     return {
         "status": "active",
         "model_loaded": model is not None,
-        "metrics": config.get("metrics") if config else None
+        "metrics": config.get("metrics") if config else None,
+        "api_version": "2.0 (Raw Telemetry Support)"
     }
 
 @app.get("/model/info")
 def model_info():
-    """Returns model metadata as requested."""
+    """Returns model metadata."""
     if not config:
         raise HTTPException(status_code=503, detail="Model config not loaded")
     return {
@@ -79,68 +84,101 @@ def model_info():
         "features": config.get("features")
     }
 
-def log_prediction(vehicle_id: str, prediction: float):
-    import datetime
-    log_entry = {
-        "timestamp": datetime.datetime.utcnow().isoformat(),
-        "vehicle_id": vehicle_id,
-        "prediction": prediction
-    }
-    print(json.dumps(log_entry))
+def calculate_features(window: List[TelemetryReading], state: VehicleState) -> Dict[str, float]:
+    """Computes model features from raw history window."""
+    if not window:
+        raise ValueError("Empty history window")
+        
+    # Convert to DataFrame
+    data = [r.dict() for r in window]
+    df = pd.DataFrame(data)
+    
+    # 1. Rolling Features
+    # We take the rolling mean of the END of the window.
+    # If window is shorter than 60 mins, we take what we have.
+    
+    # Pre-process: handle explicit None/NaN if pydantic allowed them (it enforces float, but worth noting)
+    # The pipeline logic used ffill() then rolling()
+    
+    # Stats: 15m (3 steps of 5m) and 60m (12 steps)
+    # Ensure sorted
+    # We assume the last item in 'window' is the "current" timestamp for prediction
+    
+    # Calculate means
+    # If we have 12 rows, mean is simple.
+    features = {}
+    
+    # Helper for rolling mean of last N items
+    def get_rolling_mean(col, n):
+        series = df[col]
+        if len(series) == 0: return 0.0
+        # take last min(n, len) items
+        window_slice = series.tail(n) 
+        return float(window_slice.mean())
+
+    # 15 min ~ 3 samples (assuming 5 min frequency)
+    # 60 min ~ 12 samples
+    features['exhaust_temp_pre_mean_15m'] = get_rolling_mean('exhaust_temp_pre', 3)
+    features['exhaust_temp_pre_mean_60m'] = get_rolling_mean('exhaust_temp_pre', 12)
+    
+    features['diff_pressure_mean_15m'] = get_rolling_mean('diff_pressure', 3)
+    features['diff_pressure_mean_60m'] = get_rolling_mean('diff_pressure', 12)
+    
+    # 2. Cumulative Features (passed in state)
+    features['dist_since_last_regen'] = state.dist_since_last_regen_km
+    features['time_since_last_regen_hours'] = state.time_since_last_regen_hours
+    
+    # 3. Ratio Features (on current/last reading)
+    last_row = df.iloc[-1]
+    features['engine_load'] = float(last_row['engine_load'])
+    features['rpm'] = float(last_row['rpm'])
+    
+    rpm_safe = features['rpm'] + 1.0 # 0 division protection
+    # Use the smoothed pressure for stability, or raw? Pipeline used raw diff_pressure column
+    # Pipeline: df['pressure_per_rpm'] = df['diff_pressure'] / (df['rpm'] + 1.0)
+    features['pressure_per_rpm'] = float(last_row['diff_pressure']) / rpm_safe
+    
+    return features
 
 @app.post("/predict/soot-load", response_model=PredictionOutput)
-def predict_soot_load(input_data: TelemetryInput):
+def predict_soot_load(request: PredictionRequest):
     if not model or not config:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
-    # Align features
     required_features = config['features']
-    input_features = input_data.features
+    warnings = []
     
     try:
-        vector = [input_features.get(f, 0.0) for f in required_features]
+        # Compute features
+        feats = calculate_features(request.history_window, request.current_state)
+        
+        # Prepare vector
+        # Handle missing features (defaults)
+        vector = []
+        for f in required_features:
+            if f not in feats:
+                # Some features might be missing if pipeline changed
+                # Safe default 0
+                vector.append(0.0)
+            else:
+                vector.append(feats[f])
+                
         dtest = xgb.DMatrix([vector], feature_names=required_features)
         prediction = model.predict(dtest)[0]
-        
-        # Log for monitoring
-        # Extract vehicle_id if available in features, else 'unknown'
-        vid = str(input_features.get('vehicle_id', 'unknown'))
-        log_prediction(vid, float(prediction))
+        pred_val = float(prediction)
         
         # Logic for recommendation
-        # 80% is high, 100% is critical
-        regen_needed = prediction > 80.0
+        regen_needed = pred_val > 80.0
         
         return {
-            "soot_load_predicted": float(prediction),
+            "vehicle_id": request.vehicle_id,
+            "soot_load_predicted": pred_val,
             "regeneration_needed": regen_needed,
-            "confidence_interval": [float(prediction * 0.9), float(prediction * 1.1)] # dummy
+            "confidence_interval": [pred_val * 0.9, pred_val * 1.1],
+            "warnings": warnings
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/predict/batch")
-def predict_batch(batch_input: BatchInput):
-    if not model:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-        
-    required_features = config['features']
-    vectors = []
-    
-    for instance in batch_input.instances:
-        vectors.append([instance.features.get(f, 0.0) for f in required_features])
-        
-    dtest = xgb.DMatrix(vectors, feature_names=required_features)
-    predictions = model.predict(dtest)
-    
-    results = []
-    for pred in predictions:
-        results.append({
-            "soot_load_predicted": float(pred),
-            "regeneration_needed": bool(pred > 80.0)
-        })
-        
-    return {"predictions": results}
 
 if __name__ == "__main__":
     import uvicorn

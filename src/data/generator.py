@@ -168,11 +168,17 @@ class DataGenerator:
                 curr_post_temp = curr_exhaust_temp + 50 # Exothermic reaction in DPF
             else:
                 curr_post_temp = curr_exhaust_temp - 20 # Heat loss
+            
+            # Simulate Sensor Failures (Missing Data)
+            # Randomly drop 1% of readings for robustness testing
+            if np.random.random() < 0.01: curr_pressure = np.nan
+            if np.random.random() < 0.01: curr_rpm = np.nan
+            if np.random.random() < 0.01: curr_exhaust_temp = np.nan
                 
             soot_load.append(current_soot)
             exhaust_temp_pre.append(curr_exhaust_temp)
             exhaust_temp_post.append(curr_post_temp)
-            diff_pressure.append(max(0, curr_pressure))
+            diff_pressure.append(max(0, curr_pressure) if not np.isnan(curr_pressure) else np.nan)
             rpm.append(curr_rpm)
             
         # Create DataFrame
