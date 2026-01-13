@@ -462,8 +462,8 @@ tensor-planet-intern/
 
 ---
 
-**Submitted by**: [Your Name]  
+**Submitted by**: Harsh Pratap Singh
 **Date**: January 13, 2026  
-**Contact**: [Your Email]  
+**Contact**: 22f3002166@ds.study.iitm.ac.in
 
 **Ready for Technical Interview**: Yes ✅
